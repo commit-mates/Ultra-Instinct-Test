@@ -4,16 +4,20 @@
 # environment_version = "5"
 # ///
 # MAGIC %md
-# MAGIC ## Create_Bronze_Jobs_Raw
+# MAGIC ## Create_Bronze_Raw_APNA_Jobs
 # MAGIC
 # MAGIC | Date         | Modified By      | Change Log             |
 # MAGIC |--------------|------------------|------------------------|
-# MAGIC | May 30th 2026| Yateesh Chandra  | Creating the Table : jobs_raw |
+# MAGIC | May 30th 2026| Yateesh Chandra  | Creating the Table : raw_apna_jobs |
 
 # COMMAND ----------
 
-# 
-
-# COMMAND ----------
-
-#
+spark.sql("""
+        CREATE TABLE IF NOT EXISTS jobsintel.bronze.jobs_raw (
+            MESSAGE_ID BIGINT GENERATED ALWAYS AS IDENTITY COMMENT "The identity of the message entering the table",
+            PAYLOAD STRING  COMMENT "The Json format of the data scraped from the websites",
+            BD_CREATE_DT_TM TIMESTAMP COMMENT "timestamp loaded",
+            BD_UPDATE_DT_TM TIMESTAMP COMMENT "timestamp updated"
+        )
+        USING DELTA
+ """)
