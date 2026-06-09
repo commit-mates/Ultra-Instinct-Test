@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC ## Load_APNA_Feed
 # MAGIC
@@ -8,7 +12,7 @@
 # MAGIC | **Business Logic By** | Yateesh Chandra      |
 # MAGIC | **Load Strategy**     | Append               |
 # MAGIC | **Source**            | Apna API             |
-# MAGIC | **Target**            | jobsintel.bronze.jobs_raw |
+# MAGIC | **Target**            | jobsintel.bronze.raw_apna_jobs |
 # MAGIC
 # MAGIC ---
 # MAGIC
