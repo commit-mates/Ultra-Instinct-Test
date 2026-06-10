@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC ## Load_Freshersworld_Feed
 # MAGIC
@@ -46,18 +50,20 @@ payload_list = []
 # COMMAND ----------
 
 # DBTITLE 1,Define a function to Fetch response from Freshersworld web
-def fetch_freshersworld_jobs(url):
-    response = requests.get(url, headers=headers)
+def fetch_freshersworld_jobs(url, num):
+    response = requests.get(f"{url}?&offset={num}", headers=headers)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
 
-    for card in soup.select("div.job-container, div.job-card, div.latest-jobs"):  
-        title = card.select_one("h3, h2")
+    for card in soup.select("div.job-container, div.job-card, div.latest-jobs, div.job-new-title"):  
+        title = card.select_one(".job-new-title")
         company = card.select_one(".company-name")
-        location = card.select_one(".location")
+        location = card.select_one("job-location")
         experience = card.select_one(".experience")
         payload = {
+            "job_id": card.get("job_id"),
+            "job_url" : card.get("job_display_url"),
             "title": title.get_text(strip=True) if title else None,
             "company": company.get_text(strip=True) if company else None,
             "location": location.get_text(strip=True) if location else None,
@@ -69,8 +75,16 @@ def fetch_freshersworld_jobs(url):
 
 # COMMAND ----------
 
+# DBTITLE 1,Used for testing
+num = 0
+val = [(x,) for x in fetch_freshersworld_jobs(URL, num)]
+print(val)
+
+# COMMAND ----------
+
 # DBTITLE 1,Call the Function
-val = [(x,) for x in fetch_freshersworld_jobs(URL)]
+for num in range(0, 101, 20):
+    val = [(x,) for x in fetch_freshersworld_jobs(URL, num)]
 
 # COMMAND ----------
 
@@ -81,9 +95,5 @@ freshersworld_df = spark.createDataFrame(val,schema = ['PAYLOAD']) \
 
 # COMMAND ----------
 
-freshersworld_df.display()
-
-# COMMAND ----------
-
 # DBTITLE 1,Appending the data into Target Table
-apna_df.write.mode("append").saveAsTable("jobsintel.bronze.raw_freshersworld_jobs")
+freshersworld_df.write.mode("append").saveAsTable("jobsintel.bronze.raw_freshersworld_jobs")
