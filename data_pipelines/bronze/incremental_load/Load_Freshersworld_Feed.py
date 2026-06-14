@@ -116,4 +116,4 @@ freshersworld_df = spark.createDataFrame(val,schema = ['PAYLOAD']) \
 # COMMAND ----------
 
 # DBTITLE 1,Appending the data into Target Table
-# freshersworld_df.write.mode("append").saveAsTable("jobsintel.bronze.raw_freshersworld_jobs")
+freshersworld_df.write.mode("append").saveAsTable("jobsintel.bronze.raw_freshersworld_jobs")
