@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC ## Load_Unstop_Feed
 # MAGIC
@@ -48,7 +52,7 @@ payload_list = []
 
 # DBTITLE 0,Define a function to Fetch response from APNA Jobs
 def fetch_unstop_jobs(url, num):
-    response = requests.get(url + f"&page={num}", timeout = 90)
+    response = requests.get(url + f"&page={num}", headers = headers, timeout = 90)
 
     if response.status_code != 200:
         raise Exception(f"API Error : {response.status_code}")
