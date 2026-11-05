@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC ## Load_JobCliff_Feed
 # MAGIC
@@ -17,6 +21,7 @@
 # MAGIC | Date         | Modified By      | Change Log             |
 # MAGIC |--------------|------------------|------------------------|
 # MAGIC | June 15th 2026| Yateesh Chandra  | Created Initial Version|
+# MAGIC | November 5th 2026| Yateesh Chandra  | Migrated Catalog and store entire raw payload|
 
 # COMMAND ----------
 
@@ -70,30 +75,20 @@ def detailed_job_info(url, job_id_list):
     for job_id in job_id_list:
         response = requests.get(url + str(job_id),
                                 headers = headers)
-        row = response.json()
-        payload = {
-            "job_id" : row['job']['id'],
-            "title" : row['job']['job_title'],
-            "job_desc" : row['job']['about_job'],
-            "job_type" : row['job']['job_type'],
-            "company_name" : row['job']['employer']['organization_name'],
-            "created_on" : row['job']['created_at'],
-            "last_updated" : row['job']['updated_at'],
-            "end_date" : row['job']['apply_by'],
-            "min_experience" : row['job'].get('min_experience'),
-            "max_experience" : row['job'].get('max_experience'),
-            "salary" : row['job']['salary_range'],
-            "application_url" : 'https://www.jobcliff.com/job-detail/' + str(row['job']['id']),
-            "location" : row['job']['working_location']
-        }
+        payload = response.json()['job']
+        payload["application_url"] = 'https://www.jobcliff.com/job-detail/' + str(payload['id'])
         payload_list.append(json.dumps(payload))
     return payload_list
+    
 
 # COMMAND ----------
 
 # DBTITLE 1,Call the Function
 # As per the requirement, we are targetting to capture around 60 jobs
 jobs = fetch_jobcliff_jobs(URL)
+
+# COMMAND ----------
+
 val = detailed_job_info(URL, jobs)
 
 # COMMAND ----------
@@ -106,4 +101,4 @@ jobcliff_df = spark.createDataFrame(val,schema = ['PAYLOAD']) \
 # COMMAND ----------
 
 # DBTITLE 1,Appending the data into Target Table
-jobcliff_df.write.mode("append").saveAsTable("jobsintel.bronze.raw_jobcliff_jobs")
+jobcliff_df.write.mode("append").saveAsTable("ultra_jobsintel.bronze.raw_jobcliff_jobs")
