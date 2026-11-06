@@ -21,6 +21,7 @@
 # MAGIC | Date         | Modified By      | Change Log             |
 # MAGIC |--------------|------------------|------------------------|
 # MAGIC | June 12th 2026| Yateesh Chandra  | Created Initial Version|
+# MAGIC | November 5th 2026| Yateesh Chandra  | Migrated Catalog and store entire raw payload|
 
 # COMMAND ----------
 
@@ -59,32 +60,16 @@ def fetch_unstop_jobs(url, num):
 
     jobs_list = response.json()["data"]["data"]
 
-    for row in jobs_list:
-        payload = {
-            "job_id" : row['id'],
-            "title" : row['title'],
-            "job_desc" : row['details'],
-            "job_type" : row['jobDetail']['timing'],
-            "company_id" : row['organization_id'],
-            "company_name" : row['organisation']['name'],
-            "created_on" : row['regnRequirements']['start_regn_dt'],
-            "last_updated" : row['updated_at'],
-            "end_date" : row['end_date'],
-            "min_experience" : row['jobDetail']['min_experience'],
-            "max_experience" : row['jobDetail']['max_experience'],
-            "skills" : ', '.join([item["skill"] for item in row["required_skills"]]),
-            "application_url" : row['seo_url'],
-            "location" : row['jobDetail']['locations']
-        }
+    for payload in jobs_list:
         payload_list.append(json.dumps(payload))
     return payload_list
 
 # COMMAND ----------
 
 # DBTITLE 1,Call the Function
-# As per the requirement, we are targetting to capture around 20 jobs
-num = 1
-val = fetch_unstop_jobs(URL, num)
+# As per the requirement, we are targetting to capture around 60 jobs
+for num in range(1, 4):
+    val = fetch_unstop_jobs(URL, num)
 
 # COMMAND ----------
 
@@ -96,4 +81,4 @@ unstop_df = spark.createDataFrame(val,schema = ['PAYLOAD']) \
 # COMMAND ----------
 
 # DBTITLE 1,Appending the data into Target Table
-unstop_df.write.mode("append").saveAsTable("jobsintel.bronze.raw_unstop_jobs")
+unstop_df.write.mode("append").saveAsTable("ultra_jobsintel.bronze.raw_unstop_jobs")
