@@ -51,7 +51,7 @@ payload_list = []
 
 # DBTITLE 1,Define a function to Fetch response from JoinSaarthi Jobs
 def fetch_JoinSaarthi_jobs(url, num = 1):
-    response = requests.get(url + f"?limit=10", headers=headers, timeout = 90)
+    response = requests.get(url + f"?limit=50", headers=headers, timeout = 90)
 
     if response.status_code != 200:
         raise Exception(f"API Error : {response.status_code}")
