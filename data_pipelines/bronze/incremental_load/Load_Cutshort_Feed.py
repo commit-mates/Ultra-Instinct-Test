@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC ## Load_Cutshort_Feed
 # MAGIC
@@ -51,6 +55,23 @@ session.headers.update(headers)
 
 # COMMAND ----------
 
+# DBTITLE 1,Define a function to find Job Objects
+def find_job_objects(data):
+    jobs = []
+    if isinstance(data, dict):
+        if (data.get("publicUrl") and data.get("headline")):
+            jobs.append(data)
+        for value in data.values():
+            jobs.extend(find_job_objects(value))
+
+    elif isinstance(data, list):
+        for item in data:
+            jobs.extend(find_job_objects(item))
+
+    return jobs
+
+# COMMAND ----------
+
 # DBTITLE 1,Function to extract Embedded JSON from Job Page
 def extract_job_data(soup):
 
@@ -95,23 +116,6 @@ def fetch_cutshort_job_list(url):
 
 # COMMAND ----------
 
-# DBTITLE 1,Define a function to find Job Objects
-def find_job_objects(data):
-    jobs = []
-    if isinstance(data, dict):
-        if (data.get("publicUrl") and data.get("headline")):
-            jobs.append(data)
-        for value in data.values():
-            jobs.extend(find_job_objects(value))
-
-    elif isinstance(data, list):
-        for item in data:
-            jobs.extend(find_job_objects(item))
-
-    return jobs
-
-# COMMAND ----------
-
 # DBTITLE 1,Fetch the list of values
 jobs = fetch_cutshort_job_list(URL)
 
@@ -152,6 +156,10 @@ val = get_cutshort_job(job_list)
 cutshort_df = spark.createDataFrame(val,schema = ['PAYLOAD']) \
             .withColumn("BD_CREATE_DT_TM", current_timestamp()) \
             .withColumn("BD_UPDATE_DT_TM", current_timestamp())
+
+# COMMAND ----------
+
+display(cutshort_df)
 
 # COMMAND ----------
 
