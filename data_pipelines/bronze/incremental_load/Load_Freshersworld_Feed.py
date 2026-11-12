@@ -21,24 +21,36 @@
 # MAGIC | Date         | Modified By      | Change Log             |
 # MAGIC |--------------|------------------|------------------------|
 # MAGIC | June 9th 2026| Yateesh Chandra  | Created Initial Version|
-# MAGIC | November 5th 2026| Yateesh Chandra  | Migrated Catalog and store entire raw payload|
+# MAGIC | November 5th 2026| Yateesh Chandra  | Migrated Catalog and store entire raw payload |
+# MAGIC | November 12th 2026| Yateesh Chandra  | Introduced Job_Id and Job_Url |
 
 # COMMAND ----------
 
 # DBTITLE 1,Import Libraries
-import requests
 import json
+import requests
+import threading
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+from concurrent.futures import ThreadPoolExecutor
+from requests.adapters import HTTPAdapter
 from pyspark.sql.functions import *
-from pyspark.sql.types import *
 
 # COMMAND ----------
 
 # DBTITLE 1,Initialize Variables
-# Define the URL
-URL = "https://www.freshersworld.com/jobs/category/it-software-job-vacancies"
+BASE_URL = "https://www.freshersworld.com/jobs/category/it-software-job-vacancies"
+PAGE_OFFSETS = range(0, 101, 20)
+TIMEOUT = (10, 30)
 
-headers = {
+CARD_SELECTOR = (
+    "div.job-container, "
+    "div.job-card, "
+    "div.latest-jobs, "
+    "div.job-new-title"
+)
+
+HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -46,120 +58,161 @@ headers = {
     )
 }
 
-# Define the Empty List
-payload_list = []
-job_list = []
-job_payloads = []
+thread_local = threading.local()
+
+# COMMAND ----------
+
+# DBTITLE 1,Function to get session
+def get_session():
+
+    if not hasattr(thread_local, "session"):
+        session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=5, pool_maxsize=5)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        session.headers.update(HEADERS)
+        thread_local.session = session
+    return thread_local.session
 
 # COMMAND ----------
 
 # DBTITLE 1,Define a function to get list of Job URLs
-def get_freshersworld_job_urls(url, num):
-    response = requests.get(f"{url}?&offset={num}", headers=headers)
-    soup = BeautifulSoup(response.text, "html.parser")
+def get_freshersworld_job_urls():
+    job_urls = []
 
-    jobs = []
-    for card in soup.select(
-        "div.job-container, div.job-card, div.latest-jobs, div.job-new-title"
-    ):
-        job_url = card.get("job_display_url")
-        if job_url:
-            jobs.append(job_url)
+    for offset in PAGE_OFFSETS:
+        try:
+            response = get_session().get(
+                BASE_URL,
+                params={"offset": offset},
+                timeout=TIMEOUT
+            )
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+            page_urls = [
+                urljoin(BASE_URL, card["job_display_url"])
+                for card in soup.select(CARD_SELECTOR)
+                if card.get("job_display_url")
+            ]
+            job_urls.extend(page_urls)
+            print(
+                f"Offset: {offset} | "
+                f"Jobs Found: {len(page_urls)}"
+            )
+        except requests.RequestException as e:
+            print(f"Listing page failed | Offset: {offset} | {e}")
 
-    return jobs
+    return list(dict.fromkeys(job_urls))
 
 # COMMAND ----------
 
-# DBTITLE 1,Remove @context and @type
-def remove_key_recursive(data, key_to_remove):
+# DBTITLE 1,Identify Job Posting JSON Objects
+def extract_job_postings(data):
+    if isinstance(data, list):
+        for item in data:
+            yield from extract_job_postings(item)
+    elif isinstance(data, dict):
+        job_type = data.get("@type", [])
 
-    if isinstance(data, dict):
-        return {
-            key: remove_key_recursive(value, key_to_remove)
-            for key, value in data.items()
-            if key != key_to_remove
-        }
+        if isinstance(job_type, str):
+            job_type = [job_type]
+        if any(
+            str(t).rstrip("/").split("/")[-1] == "JobPosting"
+            for t in job_type
+        ):
+            yield data
+        # Handle nested JSON-LD @graph
+        if "@graph" in data:
+            yield from extract_job_postings(data["@graph"])
 
-    elif isinstance(data, list):
-        return [
-            remove_key_recursive(item, key_to_remove)
-            for item in data
-        ]
+# COMMAND ----------
 
-    return data
+# DBTITLE 1,Extract Job IDs
+def get_job_id(job):
+
+    identifier = job.get("identifier")
+    if isinstance(identifier, dict):
+        identifier = (identifier.get("value") or identifier.get("name"))
+
+    elif isinstance(identifier, list):
+        identifier = next(
+            (
+                item.get("value")
+                for item in identifier
+                if isinstance(item, dict) and item.get("value")
+            ),
+            None
+        )
+
+    return str(
+        identifier
+        or job.get("url")
+        or job.get("@id")
+        or json.dumps(job, sort_keys=True, ensure_ascii=False)
+    )
 
 # COMMAND ----------
 
 # DBTITLE 1,Fetch the data from jobposting_url
-def fetch_jobposting_data(url):
-    response = requests.get(url, headers=headers, timeout=30)
-    response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    scripts = soup.find_all("script", type="application/ld+json")
+def fetch_jobposting_data(job_url):
 
-    url_payload_list = []
+    try:
+        response = get_session().get(job_url, timeout=TIMEOUT)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
 
-    for script in scripts:
-        try:
-            data = json.loads(script.string or script.get_text())
-            if isinstance(data, dict):
-                job_postings = [data]
-                if "@graph" in data:
-                    job_postings = data["@graph"]
-            elif isinstance(data, list):
-                job_postings = data
-            else:
+        clean_url = job_url.split("?")[0].split("#")[0].rstrip("/")
+        job_id = clean_url.split("-")[-1]
+
+        job_records = []
+
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string or script.get_text())
+            except (json.JSONDecodeError, TypeError):
                 continue
 
-            for job in job_postings:
-                if not isinstance(job, dict):
-                    continue
-                if job.get("@type") != "JobPosting":
-                    continue
-                job_id = str(job.get("identifier", {}).get("value", ""))
+            for job in extract_job_postings(data):
+                job_payload = {
+                    "jobId": job_id,
+                    "jobUrl": job_url,
+                    **job
+                }
+                job_payload.pop("@type")
+                job_payload.pop("@context")
+                payload = json.dumps(job_payload, ensure_ascii=False)
+                job_records.append((job_id, payload))
+        return job_records
 
-                if not job_id or job_id in seen_job_ids:
-                    continue
-                seen_job_ids.add(job_id)
-                job = remove_key_recursive(job, "@context")
-                job = remove_key_recursive(job, "@type")
-
-                url_payload_list.append(json.dumps(job, ensure_ascii=False))
-        except (json.JSONDecodeError, TypeError):
-            continue
-
-    return url_payload_list
+    except requests.RequestException as e:
+        print(f"Failed URL: {job_url} | Error: {e}")
+        return []
 
 # COMMAND ----------
 
 # DBTITLE 1,Call the Function
-job_url_set = set()
+job_urls = get_freshersworld_job_urls()
+
 seen_job_ids = set()
+job_payloads = []
 
-for num in range(0, 101, 20):
-    job_urls = get_freshersworld_job_urls(URL, num)
-    job_url_set.update(job_urls)
-job_list = list(job_url_set)
-
-for job_url in job_list:
-    try:
-        job_payloads.extend(fetch_jobposting_data(job_url))
-
-    except requests.RequestException as e:
-        print(f"Failed URL: {job_url} | Error: {e}")
-
-# COMMAND ----------
-
-# DBTITLE 1,Return the Data to list
-val = [(payload,) for payload in job_payloads]
+with ThreadPoolExecutor(max_workers=3) as executor:
+    for records in executor.map(fetch_jobposting_data, job_urls):
+        for job_id, payload in records:
+            if job_id not in seen_job_ids:
+                seen_job_ids.add(job_id)
+                job_payloads.append(payload)
 
 # COMMAND ----------
 
 # DBTITLE 1,Reading the data into Dataframe
-freshersworld_df = spark.createDataFrame(val,schema = ['PAYLOAD']) \
-            .withColumn("BD_CREATE_DT_TM", current_timestamp()) \
-            .withColumn("BD_UPDATE_DT_TM", current_timestamp())
+freshersworld_df = spark.createDataFrame(
+                        [(payload,) for payload in job_payloads],
+                        schema = ['PAYLOAD']
+                    ) \
+                    .withColumn("BD_CREATE_DT_TM", current_timestamp()) \
+                    .withColumn("BD_UPDATE_DT_TM", current_timestamp())
 
 # COMMAND ----------
 
